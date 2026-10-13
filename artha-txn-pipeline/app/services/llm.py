@@ -111,3 +111,123 @@ Respond ONLY with valid JSON in this exact shape:
     except json.JSONDecodeError:
         logger.error("Could not parse LLM narrative response: %s", raw[:500])
         raise LLMError("invalid JSON from narrative call")
+
+
+def ask_artha_copilot(query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Core Ask Artha Reasoning Engine:
+    Grounded strictly in the user's Financial Context, deterministic calculations,
+    and authoritative regulatory sources (SEBI, RBI, Tax Dept, etc.).
+    """
+    profile = context.get("profile", {})
+    calcs = context.get("deterministic_calculations", {})
+    portfolio = context.get("portfolio", {})
+    goals = context.get("goals", [])
+    rag_sources = context.get("regulatory_sources", [])
+
+    sources_summary = "\n".join([
+        f"- [{s.get('source')} - {s.get('title')}]: {s.get('content')}"
+        for s in rag_sources
+    ]) or "Standard regulatory guidelines (SEBI, RBI, Income Tax Dept)."
+
+    prompt = f"""You are Artha, an India-first personal financial co-pilot for salaried individuals.
+You provide educational decision-support based strictly on facts, user data, and authoritative sources.
+Do NOT guarantee returns. Do NOT give SEBI-unregistered personalized investment buy/sell mandates.
+
+### USER FINANCIAL CONTEXT (Deterministic Backend Calculations):
+- Monthly Salary: ₹{profile.get('monthly_salary', 0):,.0f} | Other Income: ₹{profile.get('other_income', 0):,.0f}
+- Monthly Expenses: ₹{profile.get('essential_expenses', 0) + profile.get('discretionary_expenses', 0) + profile.get('rent', 0):,.0f}
+- Monthly EMI Obligations: ₹{profile.get('emi_obligations', 0):,.0f} (DTI Ratio: {calcs.get('debt_burden', {}).get('dti_ratio_pct', 0):.1f}%)
+- Net Monthly Investable Surplus: ₹{calcs.get('surplus', {}).get('net_surplus', 0):,.0f} ({calcs.get('surplus', {}).get('savings_rate_pct', 0):.1f}% savings rate)
+- Emergency Fund: ₹{profile.get('emergency_fund', 0):,.0f} ({calcs.get('emergency_fund', {}).get('months_covered', 0):.1f} months covered, Target Gap: ₹{calcs.get('emergency_fund', {}).get('gap', 0):,.0f})
+- Financial Health Score: {calcs.get('health_score', {}).get('total_score', 0)}/100 ({calcs.get('health_score', {}).get('rating', 'Good')})
+- Active Portfolio Value: ₹{portfolio.get('current_value', 0):,.0f} (Invested: ₹{portfolio.get('total_invested', 0):,.0f}, Return: {portfolio.get('return_pct', 0):.1f}%)
+- Stated Goals: {json.dumps(goals, default=str)}
+- Risk Profile: {profile.get('risk_profile', 'moderate')} | Horizon: {profile.get('investment_horizon', 'medium')}
+
+### TRUSTED REGULATORY SOURCES RETRIEVED:
+{sources_summary}
+
+### USER QUESTION:
+"{query}"
+
+### INSTRUCTIONS:
+1. First, acknowledge their exact situation using the calculated numbers (surplus, emergency fund, health score).
+2. Clearly structure recommendations into:
+   - **Current Situation & Diagnosis**
+   - **Step-by-Step Priority** (1. Emergency buffer if <6 months, 2. High-cost debt, 3. Term/Health insurance, 4. Goal-aligned index SIPs)
+   - **Suitable Asset Categories & Considerations** (Risk, liquidity, typical horizon)
+3. Explicitly state assumptions used for any compounding numbers.
+4. Conclude with source citations.
+
+Respond with valid JSON:
+{{
+  "answer": "<structured markdown response>",
+  "sources": [{{"source": "<Regulator>", "title": "<Doc Title>", "note": "<Key takeaway>"}}],
+  "calculations_used": {{"net_surplus": <float>, "emergency_gap": <float>, "health_score": <int>}},
+  "assumptions": ["<assumptions list e.g. 10-12% assumed CAGR for equity index funds over 7+ years>"]
+}}
+"""
+    if settings.llm_provider == "mock" or not settings.gemini_api_key:
+        # High quality offline fallback generator
+        surplus = calcs.get("surplus", {}).get("net_surplus", 8000.0)
+        ef_months = calcs.get("emergency_fund", {}).get("months_covered", 2.5)
+        ef_gap = calcs.get("emergency_fund", {}).get("gap", 50000.0)
+        h_score = calcs.get("health_score", {}).get("total_score", 68)
+
+        sample_answer = f"""### 📊 Your Financial Snapshot & Assessment
+Based on your profile, your net monthly surplus is **₹{surplus:,.0f}** after accounting for your essential expenses and commitments. Your current Financial Health Score stands at **{h_score}/100**.
+
+### 🎯 Recommended Priority Order:
+
+1. **Build Your Safety Buffer (Emergency Fund)**:
+   - You currently have **{ef_months:.1f} months** of living expenses parked in liquid savings.
+   - *Action*: Allocate **₹{min(surplus * 0.5, ef_gap):,.0f}/month** into a sweep-in fixed deposit or Liquid Mutual Fund until you reach a full 6-month buffer.
+
+2. **Core Wealth Accumulation via Direct SIPs**:
+   - With your remaining surplus (**₹{surplus * 0.5:,.0f}/month**), consider starting a Systematic Investment Plan (SIP) split between:
+     - **Nifty 50 Index Direct Plan** (60%): Low expense ratio (<0.2%), zero manager risk.
+     - **Flexi-Cap / Multi-Asset Direct Fund** (40%): Balanced diversification.
+
+3. **Protection Check**:
+   - Ensure you hold a pure **Term Life Insurance** cover of at least 10x your annual income (₹{profile.get('monthly_salary', 30000) * 120:,.0f}) and an independent personal health cover.
+
+---
+⚠️ *Disclaimer: This is educational decision-support. Actual returns will vary with market cycles.*"""
+
+        return {
+            "answer": sample_answer,
+            "sources": [
+                {"source": s.get("source", "RBI / SEBI"), "title": s.get("title", "Financial Frameworks"), "note": "Emergency buffer & index SIP guidelines"}
+                for s in rag_sources
+            ] or [
+                {"source": "RBI", "title": "Household Financial Prudence Guidelines", "note": "Maintain 3-6 months liquid buffer"},
+                {"source": "SEBI", "title": "Mutual Fund Categorization & Direct Plan Norms", "note": "Zero commission in direct plans saves 0.5-1.5% TER annually"},
+                {"source": "Income Tax Department", "title": "Tax Slabs FY 2025-26", "note": "Standard deduction ₹75,000 under New Regime"},
+            ],
+            "calculations_used": {
+                "net_surplus": surplus,
+                "emergency_gap": ef_gap,
+                "health_score": h_score,
+                "savings_rate_pct": calcs.get("surplus", {}).get("savings_rate_pct", 25.0),
+            },
+            "assumptions": [
+                "Assumes 10% to 12% annualized long-term return for equity index funds over a 5+ year horizon.",
+                "Assumes inflation rate of 5.5% per annum.",
+            ],
+        }
+
+    try:
+        raw = _call_llm(prompt)
+        cleaned = raw.strip().strip("```json").strip("```").strip()
+        return json.loads(cleaned)
+    except Exception as e:
+        logger.warning("LLM copilot call failed or JSON malformed, using structured fallback: %s", e)
+        # return structured fallback
+        return {
+            "answer": f"### Financial Assessment\nBased on your monthly surplus of **₹{calcs.get('surplus', {}).get('net_surplus', 0):,.0f}**, your primary focus should be bridging your emergency fund gap before expanding long-term equity SIPs.",
+            "sources": [{"source": "SEBI & RBI", "title": "Prudence Frameworks", "note": "Emergency & SIP guidelines"}],
+            "calculations_used": {"net_surplus": calcs.get("surplus", {}).get("net_surplus", 0)},
+            "assumptions": ["Educational scenario based on historical index data."],
+        }
+

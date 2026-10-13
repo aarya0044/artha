@@ -106,3 +106,119 @@ class MerchantCategoryCache(Base):
     confidence = Column(Float, default=0.0)
     hit_count = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class FinancialProfile(Base):
+    """
+    Central user financial profile storing income, expenses, savings,
+    risk preferences, and insurance coverages.
+    """
+    __tablename__ = "financial_profiles"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    user_id = Column(String, default="default_user", unique=True, index=True)
+
+    monthly_salary = Column(Float, default=0.0)
+    other_income = Column(Float, default=0.0)
+    essential_expenses = Column(Float, default=0.0)
+    discretionary_expenses = Column(Float, default=0.0)
+    rent = Column(Float, default=0.0)
+    emi_obligations = Column(Float, default=0.0)
+    current_savings = Column(Float, default=0.0)
+    emergency_fund = Column(Float, default=0.0)
+
+    # Risk & Horizon
+    risk_profile = Column(String, default="moderate")  # low | moderate | high
+    investment_horizon = Column(String, default="medium")  # short | medium | long
+
+    # Protections & Tax
+    has_term_insurance = Column(String, default="no")  # no | yes_adequate | lic_only
+    term_cover_amount = Column(Float, default=0.0)
+    has_health_insurance = Column(String, default="none")  # none | employer_only | personal | both
+    tax_regime_preference = Column(String, default="new")  # old | new
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    goals = relationship("FinancialGoal", back_populates="profile", cascade="all, delete-orphan")
+    holdings = relationship("InvestmentHolding", back_populates="profile", cascade="all, delete-orphan")
+
+
+class FinancialGoal(Base):
+    """
+    Financial goals with target amount, target date, and priority.
+    """
+    __tablename__ = "financial_goals"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    profile_id = Column(UUID(as_uuid=False), ForeignKey("financial_profiles.id"), nullable=True, index=True)
+
+    name = Column(String, nullable=False)
+    target_amount = Column(Float, nullable=False)
+    current_amount = Column(Float, default=0.0)
+    target_date = Column(String, nullable=True)  # YYYY-MM or YYYY-MM-DD
+    priority = Column(String, default="medium")  # high | medium | low
+    category = Column(String, nullable=True)     # Emergency, Home, Education, Retirement, Travel, etc.
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    profile = relationship("FinancialProfile", back_populates="goals")
+
+
+class InvestmentHolding(Base):
+    """
+    Investment holdings across Stocks, Mutual Funds, ETFs, PPF, NPS, Gold, Cash, etc.
+    """
+    __tablename__ = "investment_holdings"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    profile_id = Column(UUID(as_uuid=False), ForeignKey("financial_profiles.id"), nullable=True, index=True)
+
+    asset_name = Column(String, nullable=False)
+    asset_type = Column(String, nullable=False)  # Equity, Mutual Funds, ETFs, PPF, NPS, Gold, Debt, Cash/FD, Other
+    amount_invested = Column(Float, nullable=False)
+    current_value = Column(Float, nullable=False)
+    quantity = Column(Float, nullable=True)
+    purchase_date = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    profile = relationship("FinancialProfile", back_populates="holdings")
+
+
+class KnowledgeDocument(Base):
+    """
+    Curated knowledge base document from authoritative Indian regulators (SEBI, RBI, Tax Dept, etc.).
+    """
+    __tablename__ = "knowledge_documents"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    source_name = Column(String, nullable=False)  # SEBI, RBI, Income Tax Department, AMFI, IRDAI, PFRDA
+    title = Column(String, nullable=False)
+    document_url = Column(String, nullable=True)
+    topic = Column(String, nullable=False)  # mutual_funds, taxation, banking, retirement, insurance
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    chunks = relationship("KnowledgeChunk", back_populates="document", cascade="all, delete-orphan")
+
+
+class KnowledgeChunk(Base):
+    """
+    Text chunks extracted from regulatory knowledge documents for lightweight RAG retrieval.
+    """
+    __tablename__ = "knowledge_chunks"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+    document_id = Column(UUID(as_uuid=False), ForeignKey("knowledge_documents.id"), nullable=False, index=True)
+
+    content = Column(Text, nullable=False)
+    keywords = Column(Text, nullable=True)  # Space or comma-separated keywords for deterministic ranking
+    metadata_info = Column(JSON, default=dict)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    document = relationship("KnowledgeDocument", back_populates="chunks")
